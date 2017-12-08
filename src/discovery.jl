@@ -1,5 +1,5 @@
 export find_library, find_binary,
-       find_driver, find_toolkit, find_toolkit_version, find_toolchain
+       find_driver, find_toolkit, find_toolkit_version, find_toolchain, find_host_compiler
 
 
 # names
@@ -217,13 +217,23 @@ function find_toolchain(toolkit_path, toolkit_version=find_toolkit_version(toolk
     nvcc_version = toolkit_version
 
     # find a suitable host compiler
+    host_compiler, host_version = find_host_compiler(toolkit_version)
+
+    return Toolchain(nvcc_path, nvcc_version,
+                     host_compiler, host_version)
+end
+
+function find_host_compiler(toolkit_version=nothing)
     if !(Compat.Sys.iswindows() || Compat.Sys.isapple())
         # Unix-like platforms: find compatible GCC binary
 
         # find the maximally supported version of gcc
-        gcc_range = gcc_for_cuda(toolkit_version)
-        @trace("CUDA $toolkit_version supports GCC $gcc_range")
-
+        gcc_range = []
+        if toolkit_version != nothing
+            gcc_range = gcc_for_cuda(toolkit_version)
+            @trace("CUDA $toolkit_version supports GCC $gcc_range")
+        end
+        
         # enumerate possible names for the gcc binary
         # NOTE: this is coarse, and might list invalid, non-existing versions
         gcc_names = [ "gcc" ]
@@ -256,7 +266,7 @@ function find_toolchain(toolkit_path, toolkit_version=find_toolkit_version(toolk
             gcc_ver = VersionNumber(m.captures[1])
             @trace("Found GCC $gcc_ver at $gcc_path")
 
-            if in(gcc_ver, gcc_range)
+            if in(gcc_ver, gcc_range) || toolkit_version == nothing
                 push!(gcc_possibilities, (gcc_path, gcc_ver))
             end
         end
@@ -275,17 +285,15 @@ function find_toolchain(toolkit_path, toolkit_version=find_toolkit_version(toolk
         cl_path = joinpath(dirname(dirname(dirname(vs_cmd_tools_dir))), "VC", "bin", Sys.WORD_SIZE == 64 ? "amd64" : "", "cl.exe")
 
         host_compiler = cl_path
-        host_version = nothing
+        host_version = v"0"
     elseif Compat.Sys.isapple()
         # GCC is no longer supported on MacOS so let's just use clang
         # TODO: proper version matching, etc
         clang_path = find_binary("clang")
 
         host_compiler = clang_path
-        host_version = nothing
+        host_version = v"0"
     end
     @debug("Selected host compiler version $host_version at $host_compiler")
-
-    return Toolchain(nvcc_path, nvcc_version,
-                     host_compiler, host_version)
+    return host_compiler, host_version
 end
