@@ -22,8 +22,12 @@ function find_library(name, prefixes=String[])
 
     # figure out names
     if Compat.Sys.iswindows()
+        names = [name] # nvcuda.dll does not have numbers
         tag = Sys.WORD_SIZE == 64 ? "64" : "32"
-        names = map(ver->"$name$(tag)_$(ver.major)$(ver.minor)", toolkits)
+        append!(names, map(ver->"$name$(tag)_$(ver.major)$(ver.minor)", toolkits))
+        if name == "cudnn"
+	    append!(names, map(ver->"$name$(tag)_$(ver.major)", cudnns)) # cudnn64_7.dll has single version digit
+	end
     else
         names = ["lib$name"]
     end
@@ -39,8 +43,8 @@ function find_library(name, prefixes=String[])
     end
 
     @trace("Checking for $names in $locations")
-    name = Libdl.find_library(names, locations)
-    if isempty(name)
+    namefound = Libdl.find_library(names, locations)
+    if isempty(namefound)
         error("Could not find $name library")
     end
 
@@ -48,7 +52,7 @@ function find_library(name, prefixes=String[])
     # NOTE: we could just as well use the result of `find_library,
     # but the user might have run this script with eg. LD_LIBRARY_PATH set
     # so we save the full path in order to always be able to load the correct library
-    path = Libdl.dlpath(name)
+    path = Libdl.dlpath(namefound)
     @debug("Using $name library at $path")
     return path
 end
@@ -282,17 +286,17 @@ function find_host_compiler(toolkit_version=nothing)
         vc_versions = ["VS140COMNTOOLS", "VS120COMNTOOLS", "VS110COMNTOOLS", "VS100COMNTOOLS"]
         !any(x -> haskey(ENV, x), vc_versions) && error("Compatible Visual Studio installation cannot be found; Visual Studio 2015, 2013, 2012, or 2010 is required.")
         vs_cmd_tools_dir = ENV[vc_versions[first(find(x -> haskey(ENV, x), vc_versions))]]
-        cl_path = joinpath(dirname(dirname(dirname(vs_cmd_tools_dir))), "VC", "bin", Sys.WORD_SIZE == 64 ? "amd64" : "", "cl.exe")
-
-        host_compiler = cl_path
-        host_version = v"0"
+        host_compiler = joinpath(dirname(dirname(dirname(vs_cmd_tools_dir))), "VC", "bin", Sys.WORD_SIZE == 64 ? "amd64" : "", "cl.exe")
+        tmpfile = tempname() # cl.exe writes version info to stderr, this is the only way I know of capturing it
+        readstring(pipeline(`$host_compiler`,stderr=tmpfile))
+        versionstring = match(r"Version\s+(\d+(\.\d+)?(\.\d+)?)"i, readstring(tmpfile))[1]
+        host_version = VersionNumber(versionstring)
     elseif Compat.Sys.isapple()
         # GCC is no longer supported on MacOS so let's just use clang
         # TODO: proper version matching, etc
-        clang_path = find_binary("clang")
-
-        host_compiler = clang_path
-        host_version = v"0"
+        host_compiler = find_binary("clang")
+        versionstring = match(r"version\s+(\d+(\.\d+)?(\.\d+)?)"i, readstring(`$host_compiler --version`))[1]
+        host_version = VersionNumber(versionstring)
     end
     @debug("Selected host compiler version $host_version at $host_compiler")
     return host_compiler, host_version
