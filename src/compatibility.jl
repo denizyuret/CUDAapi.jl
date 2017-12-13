@@ -80,7 +80,7 @@ function msvc_supported(msvc::VersionNumber, toolkit::VersionNumber)
         end
     end
 
-    msvc_num = parse(Int, string(msvc.major, msvc.minor))
+    msvc_num = msvc.major * 100 + msvc.minor # parse(Int, string(msvc.major, msvc.minor)) # does not work for v"19.0"
     return in(msvc_num, msvc_range)
 end
 

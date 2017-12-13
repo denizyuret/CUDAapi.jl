@@ -8,6 +8,8 @@ export find_library, find_binary,
 const nvcc = "nvcc"
 
 const libcuda = Compat.Sys.iswindows() ? "nvcuda" : "cuda"
+# Do you really want to do this for all of cublas, curand, etc.?
+# I think it is more practical to try out the version suffixes in find_library -- deniz
 const libcudart = if Compat.Sys.iswindows()
     tag = Sys.WORD_SIZE == 64 ? "64" : "32"
     map(ver->"cudart$(tag)_$(ver.major)$(ver.minor)", reverse(toolkits))
@@ -35,7 +37,26 @@ find_library(name::String, prefixes::Vector{String}=String[]) = find_library([na
 find_library(names::Vector{String}, prefix::String) = find_library(names, [prefix])
 function find_library(names::Vector{String}, prefixes::Vector{String}=String[])
     # figure out names
-    if !Compat.Sys.iswindows()
+    if Compat.Sys.iswindows() # still need all word_size, version combinations for windows!
+        # nvcuda.dll does not have numbers
+	# cudart64_90.dll, curand64_90.dll etc. have two digit version
+	# cudnn64_7.dll has single digit version
+        tag = Sys.WORD_SIZE == 64 ? "64" : "32"
+	nameext = []
+	for name in names
+	    push!(nameext, name)
+            if name != "cudnn"
+               for ver in toolkits
+         	   push!(nameext, "$name$(tag)_$(ver.major)$(ver.minor)")
+	       end
+	    else
+               for ver in cudnns
+                   push!(nameext, "$name$(tag)_$(ver.major)")
+	       end
+	    end   
+	end
+	names = sort(nameext, rev=true)
+    else
         names = ["lib$name" for name in names]
     end
 
@@ -335,7 +356,7 @@ function find_host_compiler(toolkit_version=nothing)
         msvc_list = Dict{VersionNumber,String}()
         for path in msvc_paths
             tmpfile = tempname() # cl.exe writes version info to stderr, this is the only way I know of capturing it
-            read(pipeline(`$path`, stderr=tmpfile), String)
+            read(pipeline(`$path`, stderr=tmpfile)) # , String) # gives MethodError: no method matching read(::Base.CmdRedirect, ::Type{String})
             ver_str = match(r"Version\s+(\d+(\.\d+)?(\.\d+)?)"i, read(tmpfile, String))[1]
             ver = VersionNumber(ver_str)
             msvc_list[ver] = path
